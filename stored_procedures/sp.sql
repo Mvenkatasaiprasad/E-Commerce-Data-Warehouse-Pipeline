@@ -448,3 +448,72 @@ BEGIN
     END CATCH
 END;
 GO
+
+
+
+--main
+CREATE OR ALTER PROCEDURE dbo.usp_run_pipeline
+    @load_type NVARCHAR(20) = 'snapshot'
+AS
+BEGIN
+    SET NOCOUNT ON;
+    DECLARE @start    DATETIME = GETDATE();
+    DECLARE @duration INT;
+    DECLARE @total    INT = 0;
+
+    PRINT '##############################################';
+    PRINT '  ECOMMERCE DW PIPELINE';
+    PRINT '  Mode    : ' + UPPER(@load_type);
+    PRINT '  Started : ' + CONVERT(NVARCHAR, @start, 120);
+    PRINT '##############################################';
+
+    -- STAGE 1: BRONZE
+    PRINT '';
+    PRINT '>>> STAGE 1: Bronze Load';
+    EXEC bronze.usp_load_bronze @load_type = @load_type;
+    PRINT '>>> STAGE 1 Complete';
+
+    -- STAGE 2: SILVER
+    PRINT '';
+    PRINT '>>> STAGE 2: Silver Load';
+    EXEC silver.usp_load_silver @load_type = @load_type;
+    PRINT '>>> STAGE 2 Complete';
+
+    -- STAGE 3: GOLD
+    PRINT '';
+    PRINT '>>> STAGE 3: Gold Load';
+    EXEC gold.usp_load_gold @load_type = @load_type;
+    PRINT '>>> STAGE 3 Complete';
+
+    SET @duration = DATEDIFF(SECOND, @start, GETDATE());
+
+    -- Get total rows from log
+    SELECT @total = ISNULL(SUM(rows_processed), 0)
+    FROM control.pipeline_log
+    WHERE start_time >= @start AND status = 'success';
+
+    PRINT '';
+    PRINT '##############################################';
+    PRINT '  PIPELINE COMPLETED SUCCESSFULLY';
+    PRINT '  Mode    : ' + UPPER(@load_type);
+    PRINT '  Duration: ' + CAST(@duration AS NVARCHAR) + ' seconds';
+    PRINT '  Rows    : ' + CAST(@total AS NVARCHAR);
+    PRINT '##############################################';
+END;
+GO
+
+
+
+
+-- First time: Snapshot
+EXEC dbo.usp_run_pipeline @load_type = 'snapshot';
+
+-- Second time: Incremental
+EXEC dbo.usp_run_pipeline @load_type = 'incremental';
+
+-- Logs check
+SELECT * FROM control.pipeline_log ORDER BY log_id DESC;
+
+
+-- Check watermark
+SELECT * FROM control.pipeline_watermark;
